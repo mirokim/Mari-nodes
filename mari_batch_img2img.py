@@ -3,6 +3,7 @@ import time
 import torch
 import random
 import numpy as np
+import torch.nn.functional as F
 from PIL import Image
 from nodes import KSampler, VAEEncode, VAEDecode
 
@@ -19,7 +20,6 @@ def tensor_to_pil(tensor):
     return Image.fromarray(arr)
 
 def _parse_int(value, default):
-    # Accept int/float/str (possibly empty), fallback to default
     if isinstance(value, int):
         return value
     if isinstance(value, float):
@@ -52,18 +52,44 @@ def _parse_float(value, default):
             return default
     return default
 
-class MariBatchImg2ImgConditioning:
+def _letterbox_to_canvas(image_tensor, target_h, target_w, padding_color=(0,0,0)):
+    b, h, w, c = image_tensor.shape
+    if h == target_h and w == target_w:
+        return image_tensor
+
+    scale = min(target_w / w, target_h / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    nchw = image_tensor.permute(0, 3, 1, 2).contiguous()
+    resized = F.interpolate(nchw, size=(new_h, new_w), mode="bilinear", align_corners=False)
+    nhwc = resized.permute(0, 2, 3, 1).contiguous()
+
+    canvas = torch.ones((1, target_h, target_w, 3), dtype=torch.float32)
+    canvas[..., 0] *= padding_color[0] / 255.0
+    canvas[..., 1] *= padding_color[1] / 255.0
+    canvas[..., 2] *= padding_color[2] / 255.0
+
+    top = (target_h - new_h) // 2
+    left = (target_w - new_w) // 2
+    canvas[:, top:top+new_h, left:left+new_w, :] = nhwc
+
+    return canvas
+
+class MariBatchImg2ImgConditioningSeedMode:
     @classmethod
     def INPUT_TYPES(cls):
-        # NOTE: steps/cfg are STRING to avoid UI validation errors when empty strings are present.
         return {
             "required": {
                 "input_folder": ("STRING", {"multiline": False}),
                 "output_folder": ("STRING", {"multiline": False}),
-                "steps": ("STRING", {"default": "20"}),   # robust
-                "cfg": ("STRING", {"default": "7.0"}),    # robust
+                "steps": ("STRING", {"default": "20"}),
+                "cfg": ("STRING", {"default": "7.0"}),
                 "denoise_values": ("STRING", {"default": "0.5,0.6,0.7"}),
-                "seed": ("STRING", {"default": "-1"}),    # robust: allow empty / string
+                "seed": ("STRING", {"default": "-1"}),
+                "seed_mode": (["fixed", "per_denoise", "per_image", "per_image_and_denoise", "random"],),
+                "mode": (["original", "batch"],),
+                "padding_color": ("STRING", {"default": "black"}),
                 "sampler_name": ([
                     "euler",
                     "euler_ancestral",
@@ -88,69 +114,78 @@ class MariBatchImg2ImgConditioning:
         }
 
     RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    OUTPUT_IS_LIST = (True,)
     FUNCTION = "run"
     CATEGORY = CATEGORY
 
-    def run(self, input_folder, output_folder, steps, cfg,
-            denoise_values, seed, sampler_name, scheduler, model, vae, positive, negative):
+    def _get_seed(self, base_seed, seed_mode, img_idx, dn_idx):
+        if seed_mode == "fixed":
+            return base_seed
+        elif seed_mode == "per_denoise":
+            return base_seed + dn_idx
+        elif seed_mode == "per_image":
+            return base_seed + img_idx
+        elif seed_mode == "per_image_and_denoise":
+            return base_seed + img_idx * 1000 + dn_idx  # avoid collisions
+        elif seed_mode == "random":
+            return random.randint(0, 2**32 - 1)
+        else:
+            return base_seed
 
-        # Robust parsing
+    def run(self, input_folder, output_folder, steps, cfg, denoise_values, seed, seed_mode, mode,
+            padding_color, sampler_name, scheduler, model, vae, positive, negative):
+
         steps_val = max(1, _parse_int(steps, 20))
         cfg_val = _parse_float(cfg, 7.0)
-        seed_val = _parse_int(seed, -1)
+        base_seed = _parse_int(seed, -1)
+        if base_seed == -1:
+            base_seed = random.randint(0, 2**32 - 1)
+
+        # Padding color parse
+        padding_color = padding_color.strip().lower()
+        if padding_color == "white":
+            pad_color = (255, 255, 255)
+        elif padding_color == "black":
+            pad_color = (0, 0, 0)
+        elif padding_color.startswith("#") and len(padding_color) == 7:
+            pad_color = tuple(int(padding_color[i:i+2], 16) for i in (1, 3, 5))
+        else:
+            pad_color = (0, 0, 0)
 
         os.makedirs(output_folder, exist_ok=True)
 
         try:
             denoise_list = [float(v.strip()) for v in denoise_values.split(",") if v.strip()]
         except Exception as e:
-            raise ValueError(f"Invalid denoise_values string: '{denoise_values}'. Use comma-separated floats like '0.5,0.6,0.7'.") from e
+            raise ValueError(f"Invalid denoise_values string: '{denoise_values}'.") from e
 
-        image_files = [
-            f for f in os.listdir(input_folder)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-        ]
+        image_files = [f for f in os.listdir(input_folder)
+                       if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
 
         total_tasks = len(image_files) * len(denoise_list)
         if total_tasks == 0:
-            print("[Mari - Batch Img2Img] ⚠️ No tasks to run. Check input folder or denoise_values.")
-            return (torch.empty(0),)
+            print("[Mari - Batch Img2Img] ⚠️ No tasks to run.")
+            return ([],)
 
-        task_index = 0
-        all_outputs = []
+        output_images = []
+        target_h = None
+        target_w = None
 
-        base_seed = random.randint(0, 2**32 - 1) if seed_val == -1 else seed_val
-
-        start_time = time.time()
         sampler = KSampler()
         vae_encoder = VAEEncode()
         vae_decoder = VAEDecode()
 
-        for file_index, file_name in enumerate(image_files):
+        start_time = time.time()
+
+        for img_idx, file_name in enumerate(image_files):
             img_path = os.path.join(input_folder, file_name)
             base_name = os.path.splitext(file_name)[0]
             input_tensor = load_image_tensor(img_path)
-
             init_latent = vae_encoder.encode(vae, input_tensor)[0]
 
-            for dn_index, dn in enumerate(denoise_list):
-                task_index += 1
-                current_seed = base_seed + dn_index  # seed increment per denoise
-
-                elapsed = time.time() - start_time
-                avg_time = elapsed / task_index if task_index > 0 else 0
-                eta = avg_time * (total_tasks - task_index)
-                eta_min = int(eta // 60)
-                eta_sec = int(eta % 60)
-
-                print(f"[Mari - Batch Img2Img] [{task_index}/{total_tasks}]")
-                print(f"  ➝ File: {file_name}")
-                print(f"  ➝ Denoise: {dn}")
-                print(f"  ➝ Seed: {current_seed}")
-                print(f"  ➝ Sampler: {sampler_name}, Scheduler: {scheduler}")
-                print(f"  ➝ Steps: {steps_val}, CFG: {cfg_val}")
-                print(f"  ⏳ ETA: {eta_min}m {eta_sec}s (avg {avg_time:.2f}s/image)")
-                print("-" * 40)
+            for dn_idx, dn in enumerate(denoise_list):
+                current_seed = self._get_seed(base_seed, seed_mode, img_idx, dn_idx)
 
                 sampled_latent = sampler.sample(
                     model=model,
@@ -166,11 +201,26 @@ class MariBatchImg2ImgConditioning:
                 )[0]
 
                 decoded_image = vae_decoder.decode(vae, sampled_latent)[0]
-                all_outputs.append(decoded_image)
+
+                # batch 모드일 경우 크기 통일
+                if mode == "batch":
+                    if target_h is None or target_w is None:
+                        _, target_h, target_w, _ = decoded_image.shape
+                        print(f"[Mari - Batch Img2Img] ▶ Target canvas set to {target_w}x{target_h}.")
+                    else:
+                        _, h, w, _ = decoded_image.shape
+                        if h != target_h or w != target_w:
+                            decoded_image = _letterbox_to_canvas(decoded_image, target_h, target_w, pad_color)
+
+                output_images.append(decoded_image)
 
                 save_name = f"{base_name}_denoise{dn}_seed{current_seed}.png"
                 save_path = os.path.join(output_folder, save_name)
                 tensor_to_pil(decoded_image).save(save_path)
+
+        # If mode is batch, cat them into a single tensor
+        if mode == "batch" and len(output_images) > 0:
+            output_images = [torch.cat(output_images, dim=0)]
 
         end_time = time.time()
         total_elapsed = end_time - start_time
@@ -187,10 +237,10 @@ class MariBatchImg2ImgConditioning:
         print(f"  💾 저장 경로: {output_folder}")
         print("=" * 40)
 
-        return (torch.cat(all_outputs, dim=0),)
+        return (output_images,)
 
 NODE_CLASS_MAPPINGS = {
-    "Mari - Batch Img2Img": MariBatchImg2ImgConditioning
+    "Mari - Batch Img2Img": MariBatchImg2ImgConditioningSeedMode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
