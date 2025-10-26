@@ -1,57 +1,94 @@
-### 1) Mari – Color Toolkit
-이미지의 **밝기/대비/채도/감마/색상(Hue)** 를 빠르게 조절하고, 결과를 원본과 **블렌드**하여 자연스럽게 적용할 수 있습니다.  
-- 입력: `IMAGE`, (옵션) `global_blend`
-- 출력: `IMAGE`
-- 카테고리: `Mari/Color`
+# 📦 Mari Nodes — ComfyUI 커스텀 노드 모음
 
-**핵심 포인트**
-- HSV 변환으로 Hue Shift를 안전하게 적용
-- 0~1 클램핑으로 색상 값 안정화
-- 파이프라인 어디에나 끼워 넣기 쉬운 단일 노드
+> **Mari의 개인용 툴킷**으로, 색보정, 이미지 리사이즈, 빈 잠재공간 생성,  
+> 그리고 폴더 단위의 배치 이미지 처리를 간단하게 만들어줍니다.  
+> 반복 작업을 줄이고 ComfyUI 워크플로우를 간결하게 만드는 데 초점을 두었습니다.
 
 ---
 
-### 2) Mari – Image Resize
-두 가지 모드로 이미지를 리사이즈합니다.
-- **scale 모드**: `scale`(단일 값) 또는 `scale_x/scale_y(+lock_aspect)`
-- **custom 모드**: `target_width/target_height` 로 강제 크기 지정
+## 🧰 제공 노드
 
-보간 방식: `bilinear`, `bicubic`, `nearest`, `area(다운샘플 전용)`  
-- 입력: `IMAGE`, `mode`, `method`, `scale`, `scale_x`, `scale_y`, `lock_aspect`, `target_width`, `target_height`, (옵션)`MASK`
-- 출력: `IMAGE`, `MASK`, `STRING(info)`
-- 카테고리: `Mari/Image`
-
-**핵심 포인트**
-- 마스크가 없을 경우 자동으로 **검은 마스크(0)** 를 생성해 후단 호환성 보장
-- `area` 모드는 업샘플 시 자동으로 bilinear로 대체하여 아티팩트 완화
-- Info 문자열로 리사이즈 내역(최종 크기)을 즉시 확인
+### 1. 🖼 Mari – Color Toolkit
+- 이미지의 밝기, 대비, 채도, 감마, Hue를 빠르게 조절하고 원본과 자연스럽게 블렌드.
+- HSV 변환 기반의 안전한 색조 변경.
+- 파이프라인 어디에나 끼워넣기 쉬운 단일 노드.
 
 ---
 
-### 3) Mari – Empty Latent+
-해상도 **프리셋**과 **퍼센트 스케일**을 지원하는 **빈 LATENT** 생성 노드입니다.  
-사이즈는 내부적으로 **64 배수**로 스냅되어 파이프라인 호환성을 높였습니다.
-- 입력: `preset`, `use_custom`, `width`, `height`, `scale_percent`, `batch_size`
-- 출력: `LATENT`, `out_width(INT)`, `out_height(INT)`
-- 카테고리: `Mari Nodes/Image`
-
-**핵심 포인트**
-- SD 규약에 맞춰 **항상 4채널** 잠재공간 생성
-- FHD, 4K, 9:16 등 실전 프리셋 다수 내장
-- 배치 크기 지정으로 멀티 샘플 준비 용이
+### 2. 🪄 Mari – Image Resize
+- **scale 모드**: 전체 비율 조절  
+- **custom 모드**: 지정한 해상도로 리사이즈  
+- 보간 방식 지원: bilinear, bicubic, nearest, area  
+- 마스크 자동 생성으로 후단 호환성 보장.
 
 ---
 
-### 4) Mari – Load Combo (CKPT + LoRA x8 + ver)
-**체크포인트 1개 + LoRA 최대 8개**를 한 번에 로드하고, **마스터 스위치**와 **글로벌 LoRA 스케일**로 전체 강도를 일괄 제어합니다.  
-체크포인트/LoRA의 **SD 버전(SDXL / SD 2.x / SD 1.x)** 을 이름으로 추정하여 표시합니다.
-- 입력: `ckpt_name`, `enable_loras`, `global_lora_scale`, `lora[1..8]`, `lora[1..8]_strength_model/clip`, `guess_config`, `output_vae`, (옵션)`vae_name`
-- 출력: `MODEL`, `CLIP`, `VAE`, `ckpt_version(STRING)`, `lora_versions(STRING-JSON)`
-- 카테고리: `Mari/Loaders`
-
-**핵심 포인트**
-- `guess_config=True` 시 `comfy.sd.load_checkpoint_guess_config` 사용
-- LoRA 개별 강도 × 글로벌 스케일 = 최종 강도
-- LoRA 버전 리스트를 **JSON 문자열**로 출력 → 로그/디버깅/UI 표시에 활용
+### 3. 🧱 Mari – Empty Latent+
+- 빈 Latent 이미지를 프리셋 또는 퍼센트 스케일로 생성.  
+- 64 배수 자동 스냅, 4채널 고정.  
+- 배치 크기 지정 지원으로 후속 작업 준비 용이.
 
 ---
+
+### 4. 🧠 Mari – Batch Img2Img  ✅ *(New)*
+- 폴더 내 이미지를 한 번에 불러와 i2i 변환을 자동 반복 실행.  
+- 여러 denoise 값, 다양한 seed 전략 지원.  
+- 원본 크기 출력 또는 배치 출력 선택 가능.
+
+**핵심 옵션**
+| 이름 | 설명 |
+|------|------|
+| `input_folder` / `output_folder` | 폴더 경로 |
+| `denoise_values` | 쉼표로 구분된 값 (예: `0.5,0.6,0.7`) |
+| `seed_mode` | fixed / per_denoise / per_image / per_image_and_denoise / random |
+| `mode` | original / batch |
+| `padding_color` | black / white / #RRGGBB |
+| `sampler_name`, `scheduler` | 샘플링 설정 |
+| `positive`, `negative` | 외부 CLIP Text Encode 입력 |
+
+---
+
+### 5. 🪄 Mari – Folder Image Scale ✅ *(New)*
+- 폴더 내 모든 이미지를 **가장 긴 변 기준**으로 비율 유지하며 일괄 리사이즈.
+- PNG, JPG, JPEG, WEBP 지원.
+- 배치 처리 전 단계로 활용하기 좋음.
+
+---
+
+## 🪄 예시 워크플로우
+
+```
+[Mari - Folder Image Scale]
+        └── output_folder ─▶ [Mari - Batch Img2Img].input_folder
+
+[CLIP Text Encode] (positive) ─▶ [Mari - Batch Img2Img].positive
+[CLIP Text Encode] (negative) ─▶ [Mari - Batch Img2Img].negative
+
+[Load Checkpoint]
+    ├─ model ──────────────▶ [Mari - Batch Img2Img]
+    └─ vae   ──────────────▶ [Mari - Batch Img2Img]
+```
+
+---
+
+## ⚠️ 주의사항
+- `input_folder`에 이미지 외 파일이 있으면 오류가 발생할 수 있습니다.  
+- denoise 개수가 많아질수록 처리 시간과 VRAM 사용량이 증가합니다.  
+- batch 모드에서 첫 이미지 크기가 기준이 되므로, 결과물 크기가 통일됩니다.  
+- seed_mode에 따라 결과가 달라질 수 있습니다.
+
+---
+
+## 📝 설치
+```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/mirokim/Mari-nodes
+```
+
+또는 `mari_nodes` 폴더에 개별 `.py` 파일을 복사해도 됩니다.
+
+---
+
+## 🧑‍💻 제작자
+- **Mari**
+- 📍 [https://github.com/mirokim](https://github.com/mirokim)
