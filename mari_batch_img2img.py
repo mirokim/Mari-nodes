@@ -160,8 +160,8 @@ class MariBatchImg2ImgConditioningSeedMode:
         except Exception as e:
             raise ValueError(f"Invalid denoise_values string: '{denoise_values}'.") from e
 
-        image_files = [f for f in os.listdir(input_folder)
-                       if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
+        image_files = sorted(f for f in os.listdir(input_folder)
+                             if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")))
 
         total_tasks = len(image_files) * len(denoise_list)
         if total_tasks == 0:

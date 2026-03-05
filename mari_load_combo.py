@@ -11,6 +11,7 @@ ComfyUI Custom Node: Mari Load Combo (CKPT + LoRA x8 + ver)
 
 import json
 import comfy.sd
+import comfy.utils
 import folder_paths
 
 NODE_CLASS_MAPPINGS = {}
@@ -87,7 +88,9 @@ class MariLoadCombo_CKPT_LoRA:
 
     def _apply_lora_if_any(self, model, clip, lora_name, sm, sc):
         if lora_name and lora_name != "None" and (abs(sm) > 1e-6 or abs(sc) > 1e-6):
-            model, clip = comfy.sd.load_lora_for_models(model, clip, lora_name, sm, sc)
+            lora_path = folder_paths.get_full_path("loras", lora_name)
+            lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
+            model, clip = comfy.sd.load_lora_for_models(model, clip, lora, sm, sc)
         return model, clip
 
     def load_all(self, ckpt_name, enable_loras, global_lora_scale,
