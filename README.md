@@ -35,6 +35,7 @@ git clone https://github.com/mirokim/Mari-nodes
 | Video | Mari – Video OpenPose Extractor | 영상 OpenPose 추출 → 영상 출력 |
 | Comic | Mari – Comic Grid Splitter | 그리드 이미지를 컷별로 분리 저장 |
 | Utility | Mari – Delay | 지정 시간 대기 (패스스루 노드) |
+| API | Mari – Seedance 2.0 Video | ByteDance Seedance 2.0 API 영상 생성 (T2V/I2V/레퍼런스) |
 
 ---
 
@@ -231,6 +232,35 @@ pip install mediapipe        # mediapipe 방식
 - GPU 과열 방지, 순차 실행 제어 등에 활용
 - 지원 타입: IMAGE, LATENT, MODEL, CLIP, VAE, CONDITIONING, MASK
 - `delay_seconds`: 0 ~ 300초
+
+---
+
+### Mari – Seedance 2.0 Video
+ByteDance Seedance 2.0 API(BytePlus ModelArk / Volcengine Ark)로 영상을 생성합니다.
+비동기 태스크를 제출하고 완료까지 폴링한 뒤, mp4를 `output/` 폴더에 저장하고 프레임 배치(IMAGE)로 디코딩해 출력합니다.
+
+| 파라미터 | 설명 | 기본값 |
+|----------|------|--------|
+| `api_key` | Ark API 키 (비우면 `ARK_API_KEY` 환경변수 사용) | "" |
+| `endpoint` | `BytePlus (Global)` / `Volcengine (China)` | BytePlus |
+| `model` | `seedance-2.0` / `seedance-2.0-fast` | seedance-2.0 |
+| `prompt` | 텍스트 프롬프트 (`[image 1]` 식으로 입력 이미지 참조 가능) | "" |
+| `resolution` | 480p / 720p / 1080p / 2K | 1080p |
+| `ratio` | adaptive, 16:9, 9:16, 4:3, 3:4, 21:9, 1:1 | 16:9 |
+| `duration` | 영상 길이 (4 ~ 15초) | 5 |
+| `seed` | -1 = 랜덤 | -1 |
+| `generate_audio` | 오디오 생성 여부 (mp4에만 포함, 프레임 출력에는 없음) | false |
+| `save_folder` | mp4 저장 폴더 — 비우면 ComfyUI `output/`, 상대경로는 `output/` 하위, 절대경로는 그대로 | "" |
+| `first_frame` (선택) | I2V 첫 프레임 IMAGE | – |
+| `last_frame` (선택) | 마지막 프레임 IMAGE (first_frame 필요) | – |
+| `reference_images` (선택) | 레퍼런스 이미지 배치 (요청당 이미지 총 9장 제한) | – |
+| `reference_video` (선택) | VIDEO 입력 (Load Video 등 연결, base64 인라인 전송, 최대 50MB) | – |
+| `reference_audio` (선택) | AUDIO 입력 (Load Audio 등 연결, WAV 인라인 전송, 최대 15MB) | – |
+| `reference_video_url` / `reference_audio_url` (선택) | 공개 URL, 쉼표로 최대 3개 | "" |
+
+- 출력: `frames`(IMAGE 배치), `video_path`(저장된 mp4 경로), `fps`, `info`
+- 생성 비용이 발생하는 유료 API입니다 (1080p 5초 기준 약 $1 내외)
+- 결과 영상 URL은 24시간 후 만료되므로 노드가 즉시 다운로드합니다
 
 ---
 
