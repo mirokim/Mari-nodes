@@ -289,8 +289,8 @@ class MariSeedance2:
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING", "FLOAT", "STRING")
-    RETURN_NAMES = ("frames", "video_path", "fps", "info")
+    RETURN_TYPES = ("IMAGE", "STRING", "FLOAT", "STRING", "INT")
+    RETURN_NAMES = ("frames", "video_path", "fps", "info", "tokens")
     FUNCTION = "generate"
     CATEGORY = "Mari/API"
     OUTPUT_NODE = True
@@ -372,10 +372,15 @@ class MariSeedance2:
 
         _progress_text("decoding frames...", unique_id)
         frames, fps = _decode_video(out_path)
-        usage = result.get("usage", {}).get("total_tokens", "?")
+        tokens = int(result.get("usage", {}).get("total_tokens", 0) or 0)
+        # rough estimate at the standard T2V/I2V rate (~$6.4 per 1M tokens);
+        # fast model and video-reference tasks are billed lower
+        cost = tokens / 1_000_000 * 6.4
         info = (f"task={task_id} | {frames.shape[0]} frames @ {fps:.6g} fps | "
-                f"tokens={usage} | saved: {out_path}")
-        _progress_text(f"done — {frames.shape[0]} frames @ {fps:.6g} fps", unique_id)
+                f"tokens={tokens:,} (~${cost:.2f}) | saved: {out_path}")
+        print(f"[Mari Seedance2] usage: {tokens:,} tokens (~${cost:.2f})")
+        _progress_text(f"done — {frames.shape[0]} frames | "
+                       f"{tokens:,} tokens (~${cost:.2f})", unique_id)
 
         # register the mp4 with the UI (history/output panel) — only possible
         # for files inside the ComfyUI output directory
@@ -389,7 +394,7 @@ class MariSeedance2:
                   "so the video won't appear in the output/assets panel")
 
         return {"ui": {"images": ui_videos, "animated": (True,)},
-                "result": (frames, out_path, fps, info)}
+                "result": (frames, out_path, fps, info, tokens)}
 
     # ------------------------------------------------------------------
     @staticmethod
